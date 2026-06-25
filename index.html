@@ -1,0 +1,61 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+    <meta name="theme-color" content="#f6efe5" />
+    <title>杨潇童年录音馆</title>
+    <link rel="manifest" href="./site.webmanifest" />
+    <link rel="stylesheet" href="./styles.css?v=20260625-2" />
+  </head>
+  <body>
+    <div class="app-shell">
+      <header class="topbar">
+        <div>
+          <p class="eyebrow">妈妈爸爸为我记录的童年声音</p>
+          <h1>杨潇童年录音馆</h1>
+        </div>
+        <button class="icon-button" id="themeButton" type="button" aria-label="切换明暗模式" title="切换明暗模式">
+          <span aria-hidden="true">◐</span>
+        </button>
+      </header>
+
+      <main>
+        <section class="controls" aria-label="筛选录音">
+          <div class="group-tabs" id="groupTabs" role="tablist" aria-label="录音分组"></div>
+        </section>
+
+        <section class="track-section" aria-label="录音列表">
+          <div class="section-heading">
+            <h2 id="listTitle">第 1 组</h2>
+            <span id="listMeta"></span>
+          </div>
+          <div class="track-list" id="trackList"></div>
+          <p class="empty-state" id="emptyState" hidden>没有找到匹配的录音。</p>
+        </section>
+      </main>
+    </div>
+
+    <footer class="player" id="playerBar" aria-label="音频播放器">
+      <audio id="audio"></audio>
+      <div class="player-main">
+        <button class="play-button" id="playPauseButton" type="button" aria-label="播放">
+          <span id="playIcon" aria-hidden="true">▶</span>
+        </button>
+        <div class="player-copy">
+          <span id="playerTitle">选择一段录音</span>
+          <small id="playerSubtitle">准备播放</small>
+        </div>
+        <button class="icon-button" id="prevButton" type="button" aria-label="上一首" title="上一首">‹</button>
+        <button class="icon-button" id="nextButton" type="button" aria-label="下一首" title="下一首">›</button>
+      </div>
+      <div class="progress-row">
+        <span id="currentTime">0:00</span>
+        <input id="progress" type="range" min="0" max="1000" value="0" aria-label="播放进度" />
+        <span id="duration">0:00</span>
+      </div>
+    </footer>
+
+    <script src="./app.js?v=20260625-2" type="module"></script>
+  </body>
+</html>

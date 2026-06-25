@@ -1,0 +1,10 @@
+{
+  "name": "杨潇童年录音馆",
+  "short_name": "童年录音",
+  "start_url": "./",
+  "display": "standalone",
+  "background_color": "#f6efe5",
+  "theme_color": "#f6efe5",
+  "lang": "zh-CN",
+  "icons": []
+}
