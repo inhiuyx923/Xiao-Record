@@ -1,4 +1,11 @@
 const catalogUrl = "./audio-catalog.json";
+const titlesUrl = "./track-titles.json";
+const githubConfig = {
+  owner: "inhiuyx923",
+  repo: "Xiao-Record",
+  branch: "main",
+  path: "track-titles.json",
+};
 
 const elements = {
   audio: document.querySelector("#audio"),
@@ -15,24 +22,28 @@ const elements = {
   playerTitle: document.querySelector("#playerTitle"),
   prevButton: document.querySelector("#prevButton"),
   progress: document.querySelector("#progress"),
-  searchInput: document.querySelector("#searchInput"),
   themeButton: document.querySelector("#themeButton"),
+  toast: document.querySelector("#toast"),
   trackList: document.querySelector("#trackList"),
 };
 
 const storageKeys = {
   activeTrack: "xiao-record.activeTrack",
   currentTime: "xiao-record.currentTime",
+  githubToken: "xiao-record.githubToken",
   theme: "xiao-record.theme",
 };
 
 let catalog = [];
+let trackTitles = {};
 let groups = [];
 let activeGroup = "";
 let activeTrackId = "";
 let lastRenderedTracks = [];
 let isSeeking = false;
 let playbackHint = "";
+let editingTrackId = "";
+let savingTrackId = "";
 
 function formatDuration(seconds = 0) {
   if (!Number.isFinite(seconds) || seconds <= 0) return "0:00";
@@ -54,12 +65,12 @@ function formatChineseDuration(seconds = 0) {
   return `${minutes}分钟`;
 }
 
-function titleForTrack(track) {
-  return `第 ${track.group} 组 · ${track.name.replace(/\.mp3$/i, "")}`;
+function fileTitleForTrack(track) {
+  return trackTitles[track.id] || track.name.replace(/\.mp3$/i, "");
 }
 
-function fileTitleForTrack(track) {
-  return track.name.replace(/\.mp3$/i, "");
+function titleForTrack(track) {
+  return `第 ${track.group} 组 · ${fileTitleForTrack(track)}`;
 }
 
 function groupName(group) {
@@ -71,8 +82,21 @@ function setTheme(theme) {
   localStorage.setItem(storageKeys.theme, theme);
 }
 
+function showToast(message) {
+  elements.toast.textContent = message;
+  elements.toast.hidden = false;
+  clearTimeout(showToast.timer);
+  showToast.timer = setTimeout(() => {
+    elements.toast.hidden = true;
+  }, 3200);
+}
+
 function getActiveTrack() {
   return catalog.find((track) => track.id === activeTrackId) || null;
+}
+
+function isLocalPreview() {
+  return ["localhost", "127.0.0.1", ""].includes(window.location.hostname);
 }
 
 function getVisibleTracks() {
@@ -110,18 +134,52 @@ function renderTracks() {
   )}`;
 
   tracks.forEach((track) => {
-    const button = document.createElement("button");
-    button.className = `track-row${track.id === activeTrackId ? " is-active" : ""}`;
-    button.type = "button";
-    button.innerHTML = `
-      <span class="track-index">${String(track.trackNumber).padStart(2, "0")}</span>
-      <span>
+    const isEditing = editingTrackId === track.id;
+    const row = document.createElement("div");
+    row.className = `track-row${track.id === activeTrackId ? " is-active" : ""}${isEditing ? " is-editing" : ""}`;
+
+    if (isEditing) {
+      row.innerHTML = `
+        <span class="track-index">${String(track.trackNumber).padStart(2, "0")}</span>
+        <input class="track-title-input" type="text" value="${escapeHtml(fileTitleForTrack(track))}" aria-label="录音名称" />
+        <button class="save-title-button" type="button">${savingTrackId === track.id ? "保存中" : "保存"}</button>
+      `;
+      const input = row.querySelector(".track-title-input");
+      const saveButton = row.querySelector(".save-title-button");
+      saveButton.disabled = savingTrackId === track.id;
+      saveButton.addEventListener("click", () => saveTrackTitle(track, input.value));
+      input.addEventListener("keydown", (event) => {
+        if (event.key === "Enter") saveTrackTitle(track, input.value);
+        if (event.key === "Escape") {
+          editingTrackId = "";
+          renderTracks();
+        }
+      });
+      window.setTimeout(() => {
+        input.focus();
+        input.select();
+      }, 0);
+    } else {
+      row.innerHTML = `
+        <span class="track-index">${String(track.trackNumber).padStart(2, "0")}</span>
         <span class="track-title">${fileTitleForTrack(track)}</span>
-      </span>
-      <span class="track-duration">${formatDuration(track.duration)}</span>
-    `;
-    button.addEventListener("click", () => playTrack(track.id, true));
-    elements.trackList.append(button);
+        <span class="track-duration">${formatDuration(track.duration)}</span>
+        <button class="edit-title-button" type="button" aria-label="编辑 ${escapeHtml(fileTitleForTrack(track))}" title="编辑名称">✎</button>
+      `;
+      row.addEventListener("click", () => playTrack(track.id, true));
+      row.addEventListener("keydown", (event) => {
+        if (event.key === "Enter" || event.key === " ") playTrack(track.id, true);
+      });
+      row.tabIndex = 0;
+      row.role = "button";
+      const editButton = row.querySelector(".edit-title-button");
+      editButton.addEventListener("click", (event) => {
+        event.stopPropagation();
+        editingTrackId = track.id;
+        renderTracks();
+      });
+    }
+    elements.trackList.append(row);
   });
 }
 
@@ -147,6 +205,129 @@ function render() {
   renderGroups();
   renderTracks();
   renderPlayer();
+}
+
+function escapeHtml(value) {
+  return value
+    .replaceAll("&", "&amp;")
+    .replaceAll('"', "&quot;")
+    .replaceAll("<", "&lt;")
+    .replaceAll(">", "&gt;");
+}
+
+function toBase64(value) {
+  const bytes = new TextEncoder().encode(value);
+  let binary = "";
+  bytes.forEach((byte) => {
+    binary += String.fromCharCode(byte);
+  });
+  return btoa(binary);
+}
+
+function fromBase64(value) {
+  const binary = atob(value.replace(/\n/g, ""));
+  const bytes = Uint8Array.from(binary, (char) => char.charCodeAt(0));
+  return new TextDecoder().decode(bytes);
+}
+
+async function githubRequest(path, options = {}) {
+  const token = getGithubToken();
+  const response = await fetch(`https://api.github.com${path}`, {
+    ...options,
+    headers: {
+      Accept: "application/vnd.github+json",
+      Authorization: `Bearer ${token}`,
+      "X-GitHub-Api-Version": "2022-11-28",
+      ...(options.headers || {}),
+    },
+  });
+
+  if (!response.ok) {
+    const detail = await response.json().catch(() => ({}));
+    throw new Error(detail.message || "GitHub 保存失败");
+  }
+
+  return response.json();
+}
+
+function getGithubToken() {
+  const existing = sessionStorage.getItem(storageKeys.githubToken);
+  if (existing) return existing;
+
+  const token = window.prompt(
+    "粘贴 GitHub token。需要给 inhiuyx923/Xiao-Record 仓库 Contents 读写权限。",
+  );
+  if (!token) throw new Error("没有填写 GitHub token");
+  sessionStorage.setItem(storageKeys.githubToken, token.trim());
+  return token.trim();
+}
+
+async function fetchRemoteTitles() {
+  const file = await githubRequest(
+    `/repos/${githubConfig.owner}/${githubConfig.repo}/contents/${githubConfig.path}?ref=${githubConfig.branch}`,
+  );
+  return {
+    sha: file.sha,
+    titles: JSON.parse(fromBase64(file.content)),
+  };
+}
+
+async function saveTrackTitle(track, rawTitle) {
+  const nextTitle = rawTitle.trim() || track.name.replace(/\.mp3$/i, "");
+  if (nextTitle === fileTitleForTrack(track)) {
+    showToast("名称没有变化");
+    editingTrackId = "";
+    renderTracks();
+    return;
+  }
+
+  savingTrackId = track.id;
+  renderTracks();
+
+  try {
+    if (isLocalPreview()) {
+      trackTitles = {
+        ...trackTitles,
+        [track.id]: nextTitle,
+      };
+      editingTrackId = "";
+      savingTrackId = "";
+      showToast("本地预览已更新");
+      render();
+      return;
+    }
+
+    const remote = await fetchRemoteTitles();
+    const nextTitles = {
+      ...remote.titles,
+      [track.id]: nextTitle,
+    };
+    const content = `${JSON.stringify(nextTitles, null, 2)}\n`;
+
+    await githubRequest(
+      `/repos/${githubConfig.owner}/${githubConfig.repo}/contents/${githubConfig.path}`,
+      {
+        method: "PUT",
+        body: JSON.stringify({
+          branch: githubConfig.branch,
+          content: toBase64(content),
+          message: `Rename ${track.id} to ${nextTitle}`,
+          sha: remote.sha,
+        }),
+      },
+    );
+
+    trackTitles = nextTitles;
+    showToast("已保存，线上页面稍后更新");
+    editingTrackId = "";
+    savingTrackId = "";
+    render();
+  } catch (error) {
+    sessionStorage.removeItem(storageKeys.githubToken);
+    showToast(error.message || "保存失败");
+    savingTrackId = "";
+    renderTracks();
+  }
 }
 
 async function playTrack(trackId, shouldPlay) {
@@ -255,6 +436,9 @@ async function init() {
 
   const response = await fetch(catalogUrl);
   catalog = await response.json();
+  trackTitles = await fetch(titlesUrl)
+    .then((titlesResponse) => (titlesResponse.ok ? titlesResponse.json() : {}))
+    .catch(() => ({}));
   groups = [...new Set(catalog.map((track) => track.group))].sort((a, b) => Number(a) - Number(b));
   activeGroup = groups[0] || "";
 
